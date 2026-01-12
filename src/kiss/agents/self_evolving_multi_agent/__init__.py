@@ -7,7 +7,7 @@
 
 from kiss.agents.self_evolving_multi_agent.multi_agent import (
     SelfEvolvingMultiAgent,
-    run_self_evolving_multi_agent_task,
+    run_task,
 )
 
-__all__ = ["SelfEvolvingMultiAgent", "run_self_evolving_multi_agent_task"]
+__all__ = ["SelfEvolvingMultiAgent", "run_task"]

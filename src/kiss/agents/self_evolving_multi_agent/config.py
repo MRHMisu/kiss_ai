@@ -19,13 +19,23 @@ class SelfEvolvingMultiAgentConfig(BaseModel):
         description="LLM model to use for the agent",
     )
 
+    sub_agent_model: str = Field(
+        default="gemini-3-flash-preview",
+        description="Model for sub-agents",
+    )
+
+    evolver_model: str = Field(
+        default="gemini-3-flash-preview",
+        description="Model for evolution",
+    )
+
     # Agent settings
     max_steps: int = Field(
-        default=50,
+        default=100,
         description="Maximum orchestrator steps",
     )
     max_budget: float = Field(
-        default=2.0,
+        default=10.0,
         description="Maximum budget in USD",
     )
     max_retries: int = Field(
@@ -35,11 +45,11 @@ class SelfEvolvingMultiAgentConfig(BaseModel):
 
     # Sub-agent settings
     sub_agent_max_steps: int = Field(
-        default=15,
+        default=50,
         description="Maximum steps for sub-agents",
     )
     sub_agent_max_budget: float = Field(
-        default=0.5,
+        default=2.0,
         description="Maximum budget for sub-agents in USD",
     )
 
@@ -53,79 +63,6 @@ class SelfEvolvingMultiAgentConfig(BaseModel):
         description="Working directory in container",
     )
 
-    # Dynamic tool settings
-    enable_dynamic_tools: bool = Field(
-        default=True,
-        description="Enable dynamic tool creation",
-    )
-    max_dynamic_tools: int = Field(
-        default=5,
-        description="Maximum number of dynamic tools",
-    )
-
-    # Planning settings (for multi_agent.py)
-    enable_planning: bool = Field(
-        default=True,
-        description="Enable planning capabilities",
-    )
-    max_plan_items: int = Field(
-        default=10,
-        description="Maximum items in a plan",
-    )
-
-    # Error recovery settings (for multi_agent.py)
-    enable_error_recovery: bool = Field(
-        default=True,
-        description="Enable error recovery",
-    )
-
-    # Output settings
-    verbose: bool = Field(
-        default=True,
-        description="Enable verbose output",
-    )
-    save_trajectories: bool = Field(
-        default=True,
-        description="Save agent trajectories",
-    )
-
-    # Evolver settings (for coding_agent_evolver.py)
-    evolver_population_size: int = Field(
-        default=4,
-        description="Population size for evolution",
-    )
-    evolver_max_generations: int = Field(
-        default=3,
-        description="Maximum generations for evolution",
-    )
-    evolver_mutation_rate: float = Field(
-        default=0.7,
-        description="Mutation rate for evolution",
-    )
-    evolver_elite_size: int = Field(
-        default=1,
-        description="Elite size for evolution",
-    )
-    evolver_model: str = Field(
-        default="gemini-3-flash-preview",
-        description="Model for evolution",
-    )
-
-    # Test task settings
-    test_task_timeout: int = Field(
-        default=300,
-        description="Timeout per task in seconds",
-    )
-
-    # Evolver output settings
-    evolver_output: str = Field(
-        default="evolved_agent.py",
-        description="Output file for best evolved agent",
-    )
-    evolver_test_only: bool = Field(
-        default=False,
-        description="Only test the base agent without evolution",
-    )
 
 
 # Register config with the global DEFAULT_CONFIG

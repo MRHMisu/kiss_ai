@@ -58,18 +58,20 @@ class SimpleRAG:
         self,
         model_name: str,
         metric: str = "cosine",
+        embedding_model_name: str | None = None,
     ):
         """Initialize the RAG system.
 
         Args:
-            model_name: Model name to use for generating embeddings.
+            model_name: Model name to use for the LLM provider.
             metric: Distance metric to use - "cosine" or "l2" (default: "cosine").
+            embedding_model_name: Optional specific model name for embeddings.
+                                If None, uses model_name or provider default.
         """
         self.metric = metric
         self.model_name = model_name
+        self.embedding_model_name = embedding_model_name
         self._model = model(model_name)  # Cache model instance
-
-        # In-memory storage
         self.documents: list[dict[str, Any]] = []
         self.embeddings: np.ndarray | None = None
 
@@ -83,7 +85,12 @@ class SimpleRAG:
             NumPy array representing the embedding vector.
         """
         try:
-            embedding = self._model.get_embedding(text, embedding_model=self.model_name)
+            # Use specific embedding model if provided, otherwise let provider decide
+            # or use model_name if provider requires it
+            embedding = self._model.get_embedding(
+                text,
+                embedding_model=self.embedding_model_name
+            )
             return np.array(embedding, dtype=np.float32)
         except Exception as e:
             raise KISSError(f"Failed to generate embedding: {e}") from e

@@ -25,9 +25,9 @@ Enter **KISS** — the *Keep It Simple, Stupid* Agent Framework.
 
 KISS isn't just a clever acronym. It's a design philosophy that permeates every line of code in this framework.
 
-Born of the frustration of wrestling with overly complex agent architectures, KISS strips away the unnecessary and focuses on what actually matters: **getting intelligent agents to solve real problems**.
+Born of the frustration of wrestling with overly complex agent architectures, KISS strips away the unnecessary and focuses on what actually matters: **getting intelligent agents to solve real problems**. The KISS Agent API is simple and straightforward.  It is so simple that a coding agent can write complex AI pipelines, called **agent programs**, from natural language descriptions. You can also optimize an agent program using a KISS evolver.  The result is a self-evolving agent program.
 
-Here's the entire mental model you need:
+Every KISS agent is a ReAct agent by default:
 
 ```
 1. You give the agent a prompt
@@ -63,7 +63,7 @@ print(result)  # 127.05
 
 That's a fully functional AI agent that uses tools. No boilerplate. No ceremony. Just intent, directly expressed.
 
-The magic? KISS uses **native function calling** from the LLM providers. Your Python functions become tools automatically. Type hints become schemas. Docstrings become descriptions. Everything just works.
+KISS uses **native function calling** from the LLM providers. Your Python functions become tools automatically. Type hints become schemas. Docstrings become descriptions. Everything just works.
 
 ## 🤝 Multi-Agent Orchestration: Agents That Improve Each Other
 
@@ -245,6 +245,7 @@ def sort_array(arr):
 """
 
 optimizer = KISSEvolve(
+    code_agent_wrapper=code_agent_fn,  # Function to generate code variants
     initial_code=initial_code,
     evaluation_fn=measure_performance,
     model_names=[("gemini-3-flash-preview", 0.5), ("gemini-3-pro-preview", 0.5)],
@@ -267,116 +268,49 @@ This isn't theoretical. The included `kissevolve_bubblesort.py` script demonstra
 
 ---
 
-## 🧪 AlgoTune: Benchmarking Algorithm Optimization
+## 🤖 Self-Evolving Multi-Agent: Long-Horizon Task Solving
 
-Want to see KISSEvolve in action on real optimization benchmarks? **AlgoTune** integration lets you evolve numerical algorithms against standardized tasks.
-
-```bash
-uv run python -m kiss.agents.kiss_evolve.algotune.run_algotune
-```
-
-AlgoTune provides tasks like PCA, matrix multiplication, sorting, SVM, and more. KISSEvolve:
-
-1. Loads the reference implementation from AlgoTune
-2. Generates test problems for correctness validation
-3. Evolves the algorithm using LLM-guided mutations
-4. Measures speedup against the reference
+For complex, multi-step tasks that require planning and coordination, KISS includes the **Self-Evolving Multi-Agent** — a sophisticated orchestration system that can tackle real-world software engineering challenges.
 
 ```python
-from kiss.agents.kiss_evolve.algotune.run_algotune import run_algotune
+from kiss.agents.self_evolving_multi_agent import SelfEvolvingMultiAgent, run_task
 
-result = run_algotune(
-    task="svm",           # AlgoTune task name
-    model="gemini-3-flash-preview",
-    population_size=8,
-    max_generations=10
-)
+# Create and run the agent
+agent = SelfEvolvingMultiAgent()
+result = agent.run("""
+    Build a complete E-Commerce Backend System with:
+    1. FastAPI application with JWT authentication
+    2. SQLAlchemy models for User, Product, Order, Cart
+    3. API endpoints for auth, products, cart, orders
+    4. Business logic services for inventory and pricing
+    5. Unit tests with at least 15 passing tests
+    6. Seed script with sample data
+""")
 
-print(f"Speedup: {result['speedup']:.2f}x")
-print(f"Reference: {result['initial_time']*1000:.2f}ms")
-print(f"Optimized: {result['evolved_time']*1000:.2f}ms")
-```
-
-The system automatically handles correctness testing — evolved code must produce identical outputs to the reference before performance is measured.
-
----
-
-## 🤖 Self-Evolving Multi-Agent: Orchestration with Planning
-
-For complex coding tasks that require planning, sub-task delegation, and error recovery, KISS provides the **SelfEvolvingMultiAgent** — an advanced agent with planning, error recovery, dynamic tool creation, and the ability to evolve itself for better efficiency and accuracy.
-
-### Basic Usage
-
-```python
-from kiss.agents.self_evolving_multi_agent import (
-    SelfEvolvingMultiAgent,
-    run_self_evolving_multi_agent_task,
-)
-
-# Option 1: Using the convenience function
-result = run_self_evolving_multi_agent_task(
-    task="""
-    Create a Python script that:
-    1. Generates the first 20 Fibonacci numbers
-    2. Saves them to 'fibonacci.txt'
-    3. Reads the file back and prints the sum
-    """,
-    model_name="gemini-3-flash-preview",
-    max_steps=30,
-    max_budget=1.0,
-)
-
-print(f"Status: {result['status']}")
-print(f"Result: {result['result']}")
-print(f"Stats: {result['stats']}")
-
-# Option 2: Using the class directly with full control
-agent = SelfEvolvingMultiAgent(
-    model_name="gemini-3-flash-preview",
-    docker_image="python:3.12-slim",
-    max_steps=50,
-    max_budget=2.0,
-    enable_planning=True,
-    enable_error_recovery=True,
-    enable_dynamic_tools=True,
-)
-
-result = agent.run("Create a calculator module with tests")
+# Check execution statistics
 stats = agent.get_stats()
-print(f"Completed todos: {stats['completed']}/{stats['total_todos']}")
-print(f"Dynamic tools created: {stats['dynamic_tools_created']}")
+print(f"Completed: {stats['completed']}/{stats['total_todos']}")
+print(f"Dynamic tools created: {stats['dynamic_tools']}")
 ```
 
-### What Makes It Special?
+**What makes it special?**
 
-- **Planning**: Automatically breaks down complex tasks into manageable todos with status tracking (pending → in_progress → completed/failed)
-- **Sub-Agent Delegation**: Spawns focused sub-agents for individual tasks, each with their own budget and step limits
-- **Dynamic Tool Creation**: Creates reusable tools at runtime when it detects repetitive patterns (e.g., `run_tests`, `format_code`)
-- **Error Recovery**: Automatically retries failed tasks with configurable retry logic and adjusted approaches
-- **Docker Isolation**: Executes all code in a sandboxed container for safety
-- **Self-Evolution**: Uses KISSEvolve to optimize itself for fewer LLM calls, lower budget consumption, and better accuracy
+- **Planning**: Breaks complex tasks into manageable todo items
+- **Sub-Agent Delegation**: Spawns focused sub-agents for each task
+- **Dynamic Tool Creation**: Creates reusable tools at runtime for repetitive patterns
+- **Error Recovery**: Automatically retries failed tasks with learned context
+- **Docker Isolation**: All execution happens in sandboxed containers
+- **Self-Evolution**: Can be evolved using KISSEvolve to optimize for efficiency
 
-The orchestrator maintains state and tracks progress:
-
-```
-Todo List:
-  [1] ✅ Create Fibonacci generator (completed)
-  [2] 🔄 Save to file (in_progress)
-  [3] ⬜ Read and compute sum (pending)
-```
-
-### Agent Evolution
-
-The `AgentEvolver` uses KISSEvolve to optimize the multi-agent system itself:
+The agent includes a comprehensive evaluation suite with tasks ranging from simple (Fibonacci) to extremely complex (full E-Commerce backends, blog platforms, ML pipelines). Run it from the command line:
 
 ```bash
+# Run on a complex long-horizon task
+uv run python -m kiss.agents.self_evolving_multi_agent.multi_agent
+
+# Evolve the agent for better efficiency
 uv run python -m kiss.agents.self_evolving_multi_agent.agent_evolver
 ```
-
-This evolves the agent's prompts and strategies for better efficiency and accuracy on long-horizon coding tasks. The evolver evaluates the agent on a suite of tasks with varying complexity and optimizes for:
-- **Fewer LLM calls** — Reduce API costs and latency
-- **Lower budget consumption** — Efficient resource usage
-- **Accurate completion** — Maintain correctness on long-horizon tasks
 
 ---
 
@@ -520,8 +454,9 @@ kiss/
 ├── agents/         # Pre-built agents and optimization frameworks
 │   ├── gepa/              # Genetic-Pareto prompt evolution
 │   ├── kiss_evolve/       # Evolutionary algorithm discovery
-│   ├── self_evolving_multi_agent/  # Multi-agent with planning & evolution
-│   └── swe_agent_verified/# SWE-bench benchmark integration
+│   │   └── algotune/      # AlgoTune benchmark integration
+│   ├── swe_agent_verified/# SWE-bench benchmark integration
+│   └── self_evolving_multi_agent/  # Long-horizon task agent
 ├── docker/         # Container management
 ├── rag/            # Simple retrieval-augmented generation
 └── viz_trajectory/ # Web-based trajectory visualizer
@@ -574,9 +509,14 @@ KISS doesn't try to be everything. It tries to be **exactly what you need** — 
 
 ## 🔮 What's Next?
 
-KISS is actively evolving (pun intended). The roadmap includes:
+KISS is actively evolving (pun intended). Recent additions include:
+- **AlgoTune Integration**: Optimize numerical algorithms using KISSEvolve
+- **Self-Evolving Multi-Agent**: Long-horizon task solving with planning and sub-agents
+- **Enhanced Evaluation Tasks**: E-commerce backends, blog platforms, ML pipelines, task schedulers
+
+The roadmap includes:
 - More benchmark integrations
-- Enhanced multi-agent orchestration
+- Enhanced multi-agent orchestration patterns
 - Improved evolution strategies
 - Community-contributed tools and agents
 - Asynchronous tool calling support

@@ -307,7 +307,9 @@ def evaluate_results(
                 return dict(json.load(f))
 
     except FileNotFoundError:
-        print("\n⚠️  SWE-bench evaluator not found. Install with: pip install swebench")
+        print("\n⚠️  SWE-bench evaluator not found.")
+        print("   The 'swebench' package is a dependency of KISS.")
+        print("   Try reinstalling: pip install -e . or uv sync")
     except Exception as e:
         print(f"\n❌ Error running evaluator: {e}")
 

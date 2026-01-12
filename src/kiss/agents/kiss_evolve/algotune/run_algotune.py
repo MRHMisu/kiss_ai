@@ -7,30 +7,104 @@
 """AlgoTune runner using KISSEvolve to optimize algorithm implementations."""
 
 import inspect
+import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 from typing import Any
 
 import kiss.agents.kiss_evolve.algotune.config  # noqa: F401
+import kiss.agents.kiss_evolve.config  # noqa: F401
 from kiss.agents.kiss import get_run_simple_coding_agent
-from kiss.agents.kiss_evolve.algotune.config import AlgoTuneConfig
 from kiss.agents.kiss_evolve.kiss_evolve import KISSEvolve
 from kiss.core.config import DEFAULT_CONFIG
 
-# Default AlgoTune repository path (in system temp directory)
-ALGOTUNE_PATH = Path(tempfile.gettempdir()) / "AlgoTune"
+# Required dependencies for AlgoTune tasks
+ALGOTUNE_DEPENDENCIES = ["orjson", "scipy", "scikit-learn"]
+
+# Network-related exceptions that warrant retrying
+NETWORK_ERROR_PATTERNS = [
+    "Connection reset by peer",
+    "ConnectionError",
+    "ReadError",
+    "TimeoutError",
+    "SSLError",
+    "RemoteDisconnected",
+    "httpx.ReadError",
+    "httpcore.ReadError",
+]
 
 
-def _ensure_algotune_in_path(path: Path) -> None:
-    """Add AlgoTune to sys.path if not already present."""
+def _check_and_install_dependencies() -> None:
+    """Check for required dependencies and install them if missing."""
+    missing = []
+
+    # Map package names to their import names
+    import_map = {
+        "orjson": "orjson",
+        "scipy": "scipy",
+        "scikit-learn": "sklearn",
+    }
+
+    for package in ALGOTUNE_DEPENDENCIES:
+        import_name = import_map.get(package, package)
+        try:
+            __import__(import_name)
+        except ImportError:
+            missing.append(package)
+
+    if missing:
+        print(f"Installing missing dependencies: {', '.join(missing)}...")
+        try:
+            # Try using uv first (faster), fall back to pip
+            try:
+                subprocess.run(
+                    ["uv", "pip", "install"] + missing,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+            except FileNotFoundError:
+                subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "--quiet"] + missing,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+            print(f"Successfully installed: {', '.join(missing)}")
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(
+                f"Failed to install dependencies {missing}: {e.stderr}"
+            ) from e
+
+
+def _is_network_error(error: Exception) -> bool:
+    """Check if an exception is a network-related error that should be retried."""
+    error_str = str(error) + str(type(error).__name__)
+    return any(pattern in error_str for pattern in NETWORK_ERROR_PATTERNS)
+
+
+def _ensure_algotune_installed(path: Path, repo_url: str) -> None:
+    """Clone AlgoTune repository if it doesn't exist, then add to sys.path."""
+    if not path.exists():
+        print(f"AlgoTune not found at {path}, cloning from {repo_url}...")
+        try:
+            subprocess.run(
+                ["git", "clone", "--depth", "1", repo_url, str(path)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            print(f"Successfully cloned AlgoTune to {path}")
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"Failed to clone AlgoTune: {e.stderr}") from e
+        except FileNotFoundError:
+            raise RuntimeError("Git not found. Please install git.")
+
+    # Add to sys.path if not already present
     path_str = str(path)
-    if path.exists() and path_str not in sys.path:
+    if path_str not in sys.path:
         sys.path.insert(0, path_str)
-
-
-_ensure_algotune_in_path(ALGOTUNE_PATH)
 
 
 def get_all_task_names(algotune_path: Path) -> list[str]:
@@ -247,45 +321,55 @@ def create_correctness_test_fn(task_instance, test_problems: list):
 
 
 def run_algotune(
-    config: AlgoTuneConfig | None = None,
+    max_retries: int = 3,
     **kwargs,
 ) -> dict[str, Any]:
-    """Run KISSEvolve on an AlgoTune task."""
-    if config is None:
-        config = AlgoTuneConfig(**kwargs)
-    elif kwargs:
-        config = config.model_copy(update=kwargs)
+    """Run KISSEvolve on an AlgoTune task.
 
-    # Setup AlgoTune path
-    algotune_path = Path(config.algotune_path)
-    _ensure_algotune_in_path(algotune_path)
+    Args:
+        max_retries: Maximum number of retries for network errors.
+        **kwargs: Override config parameters.
+
+    Returns:
+        Dictionary with optimization results or error information.
+    """
+
+    _check_and_install_dependencies()
+
+    algotune_path = Path(DEFAULT_CONFIG.algotune.algotune_path)  # type: ignore[attr-defined]
+    _ensure_algotune_installed(algotune_path, DEFAULT_CONFIG.algotune.algotune_repo_url)  # type: ignore[attr-defined]
 
     print("=" * 80)
-    print(f"AlgoTune Optimization: {config.task}")
+    print(f"AlgoTune Optimization: {DEFAULT_CONFIG.algotune.task}")  # type: ignore[attr-defined]
     print("=" * 80)
 
     # Load task
-    print(f"\nLoading task: {config.task}...")
-    task_class = get_task_class(config.task)
+    print(f"\nLoading task: {DEFAULT_CONFIG.algotune.task}...")  # type: ignore[attr-defined]
+    task_class = get_task_class(DEFAULT_CONFIG.algotune.task)  # type: ignore[attr-defined]
     task_instance = task_class()
 
     # Load description
-    desc_path = algotune_path / "AlgoTuneTasks" / config.task / "description.txt"
-    description = desc_path.read_text() if desc_path.exists() else config.task
+    desc_path = algotune_path / "AlgoTuneTasks" / DEFAULT_CONFIG.algotune.task / "description.txt"  # type: ignore[attr-defined]
+    description = desc_path.read_text() if desc_path.exists() else DEFAULT_CONFIG.algotune.task  # type: ignore[attr-defined]
     description = description.replace("{", "{{").replace("}", "}}")
 
     # Generate test problems
-    print(f"Generating {config.num_test_problems} test problems (size={config.problem_size})...")
+    algotune_cfg = DEFAULT_CONFIG.algotune  # type: ignore[attr-defined]
+    num_problems = algotune_cfg.num_test_problems
+    problem_size = algotune_cfg.problem_size
+    random_seed = algotune_cfg.random_seed
+    print(f"Generating {num_problems} test problems (size={problem_size})...")
     test_problems = [
-        task_instance.generate_problem(config.problem_size, random_seed=config.random_seed + i)
-        for i in range(config.num_test_problems)
+        task_instance.generate_problem(problem_size, random_seed=random_seed + i)
+        for i in range(num_problems)
     ]
 
     # Create initial code
     print("Creating initial solver from reference implementation...")
     solve_source = inspect.getsource(task_instance.solve)
-    task_file = algotune_path / "AlgoTuneTasks" / config.task / f"{config.task}.py"
-    initial_code = _create_initial_code(config.task, description, solve_source, task_file)
+    task_name = algotune_cfg.task
+    task_file = algotune_path / "AlgoTuneTasks" / task_name / f"{task_name}.py"
+    initial_code = _create_initial_code(task_name, description, solve_source, task_file)
 
     print("\nInitial code (truncated):")
     print("-" * 40)
@@ -294,7 +378,7 @@ def run_algotune(
 
     # Evaluate reference
     print("\nEvaluating reference implementation...")
-    eval_fn = create_evaluation_fn(task_instance, test_problems, config.num_timing_runs)
+    eval_fn = create_evaluation_fn(task_instance, test_problems, algotune_cfg.num_timing_runs)
     initial_result = eval_fn(initial_code)
 
     if initial_result.get("error"):
@@ -306,12 +390,12 @@ def run_algotune(
     print(f"Reference time: {initial_time * 1000:.2f} ms")
 
     # Create optimizer
-    print(f"\nInitializing model: {config.model}...")
+    print(f"\nInitializing model: {algotune_cfg.model}...")
     test_fn = create_correctness_test_fn(task_instance, test_problems)
 
     extra_instructions = f"""
 ## Task-Specific Instructions ##
-- Optimizing solver for '{config.task}' AlgoTune benchmark.
+- Optimizing solver for '{task_name}' AlgoTune benchmark.
 - Output format must match reference exactly.
 - Focus on ALGORITHMIC optimizations (better data structures, faster algorithms).
 - Use numpy, scipy, and standard Python libraries.
@@ -321,21 +405,39 @@ def run_algotune(
 {description[:1500]}
 """
 
-    print(f"\nStarting KISSEvolve (pop={config.population_size}, gen={config.max_generations})...")
+    evolve_config = DEFAULT_CONFIG.kiss_evolve  # type: ignore[attr-defined]
+    pop_size = evolve_config.population_size
+    max_gen = evolve_config.max_generations
+    print(f"\nStarting KISSEvolve (pop={pop_size}, gen={max_gen})...")
 
     optimizer = KISSEvolve(
         code_agent_wrapper=get_run_simple_coding_agent(test_fn),
         initial_code=initial_code,
         evaluation_fn=eval_fn,
-        model_names=[(config.model, 1.0)],
+        model_names=[(algotune_cfg.model, 1.0)],
         extra_coding_instructions=extra_instructions,
-        population_size=config.population_size,
-        max_generations=config.max_generations,
-        mutation_rate=config.mutation_rate,
-        elite_size=config.elite_size,
     )
 
-    best = optimizer.evolve()
+    # Run evolution with retry logic for network errors
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            best = optimizer.evolve()
+            break  # Success, exit retry loop
+        except Exception as e:
+            last_error = e
+            if _is_network_error(e) and attempt < max_retries - 1:
+                wait_time = (attempt + 1) * 5  # Exponential backoff: 5s, 10s, 15s
+                print(f"\n⚠️  Network error encountered: {type(e).__name__}")
+                print(f"   Retrying in {wait_time}s... (attempt {attempt + 2}/{max_retries})")
+                time.sleep(wait_time)
+            else:
+                raise
+    else:
+        # All retries exhausted
+        raise RuntimeError(
+            f"Evolution failed after {max_retries} attempts due to network errors"
+        ) from last_error
 
     # Results
     if best.metrics:
@@ -358,7 +460,7 @@ def run_algotune(
     print("-" * 80)
 
     return {
-        "task_name": config.task,
+        "task_name": DEFAULT_CONFIG.algotune.task,  # type: ignore[attr-defined]
         "initial_fitness": initial_result["fitness"],
         "best_fitness": best.fitness,
         "initial_time": initial_time,
@@ -369,17 +471,20 @@ def run_algotune(
     }
 
 
-def run_all_tasks(config: AlgoTuneConfig) -> list[dict[str, Any]]:
+def run_all_tasks(max_retries: int = 3) -> list[dict[str, Any]]:
     """Run KISSEvolve on all AlgoTune tasks.
 
     Args:
-        config: Base configuration (task field will be overridden for each task).
+        max_retries: Maximum number of retries for network errors per task.
 
     Returns:
         List of results for each task.
     """
-    algotune_path = Path(config.algotune_path)
-    _ensure_algotune_in_path(algotune_path)
+    # Check and install required dependencies before starting
+    _check_and_install_dependencies()
+
+    algotune_path = Path(DEFAULT_CONFIG.algotune.algotune_path)  # type: ignore[attr-defined]
+    _ensure_algotune_installed(algotune_path, DEFAULT_CONFIG.algotune.algotune_repo_url)  # type: ignore[attr-defined]
 
     task_names = get_all_task_names(algotune_path)
     if not task_names:
@@ -401,7 +506,7 @@ def run_all_tasks(config: AlgoTuneConfig) -> list[dict[str, Any]]:
         print("-" * 40)
 
         try:
-            result = run_algotune(config=config, task=task_name)
+            result = run_algotune(max_retries=max_retries, task=task_name)
             results.append(result)
 
             if "error" in result:
@@ -412,8 +517,9 @@ def run_all_tasks(config: AlgoTuneConfig) -> list[dict[str, Any]]:
                 print(f"  ✅ Speedup: {result['speedup']:.2f}x")
         except Exception as e:
             failed += 1
-            results.append({"task_name": task_name, "error": str(e)})
-            print(f"  ❌ Exception: {e}")
+            error_type = type(e).__name__
+            results.append({"task_name": task_name, "error": f"{error_type}: {e}"})
+            print(f"  ❌ Exception ({error_type}): {e}")
 
     # Summary
     print("\n" + "=" * 80)
@@ -448,11 +554,11 @@ def main():
     config = DEFAULT_CONFIG.algotune  # type: ignore[attr-defined]
 
     if config.all_tasks:
-        results = run_all_tasks(config)
+        results = run_all_tasks()
         successful = sum(1 for r in results if "error" not in r)
         print(f"\n✅ Completed {successful}/{len(results)} tasks successfully")
     else:
-        result = run_algotune(config=config)
+        result = run_algotune()
         if "error" not in result:
             print(f"\n✅ Optimization complete! Speedup: {result['speedup']:.2f}x")
         else:

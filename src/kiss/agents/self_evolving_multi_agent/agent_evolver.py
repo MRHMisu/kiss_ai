@@ -3,24 +3,24 @@
 # Koushik Sen (ksen@berkeley.edu)
 # add your name here
 
-"""Coding Agent Evolver - Evolves the AdvancedCodingAgent for better performance.
+"""Agent Evolver - Evolves the SelfEvolvingMultiAgent for better performance.
 
-This module evolves the AdvancedCodingAgent to optimize for:
+This module evolves the SelfEvolvingMultiAgent to optimize for:
 1. Fewer LLM calls (efficiency)
 2. Lower token/budget usage
-3. Accurate completion of long-horizon coding tasks
+3. Accurate completion of long-horizon agentic tasks
 """
 
 from __future__ import annotations
 
 import importlib.resources
-import json
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import kiss.agents.kiss_evolve.config  # noqa: F401
 import kiss.agents.self_evolving_multi_agent.config  # noqa: F401
 from kiss.agents.kiss_evolve.kiss_evolve import CodeVariant, KISSEvolve
 from kiss.core.config import DEFAULT_CONFIG
@@ -29,122 +29,32 @@ from kiss.core.utils import get_config_value
 from kiss.docker.docker_manager import DockerManager
 
 
-def _load_base_agent_code() -> str:
-    """Load the base agent code from multi_agent.py.
+def _load_base_agent_code(
+    package_name: str,
+    agent_file_path: str,
+) -> str:
+    """Load the base agent code from the specified package and file.
 
     This works for both:
     - Development installations (editable install with `pip install -e .`)
     - Wheel installations (pip install kiss-*.whl)
 
+    Args:
+        package_name: The package name to load from
+        agent_file_path: The filename within the package
+
     Returns:
-        The source code of multi_agent.py as a string
+        The source code of the agent file as a string
     """
     try:
-        # Python 3.9+ way using importlib.resources.files
-        package_files = importlib.resources.files("kiss.agents.self_evolving_multi_agent")
-        agent_file = package_files.joinpath("multi_agent.py")
+        package_files = importlib.resources.files(package_name)
+        agent_file = package_files.joinpath(agent_file_path)
         return agent_file.read_text(encoding="utf-8")
     except (AttributeError, TypeError):
-        # Fallback for older Python versions
         import importlib.resources as resources
 
-        with resources.open_text(
-            "kiss.agents.self_evolving_multi_agent", "multi_agent.py"
-        ) as f:
+        with resources.open_text(package_name, agent_file_path) as f:
             return f.read()
-
-
-def _create_run_task_wrapper(agent_code: str) -> str:
-    """Create a wrapper that adds a run_task function to the agent code.
-
-    The evolver expects a run_task(task, model_name, docker) function.
-    This wrapper adds that function using the SelfEvolvingMultiAgent class
-    from the loaded code.
-
-    Args:
-        agent_code: The source code of self_evolving_multi_agent.py
-
-    Returns:
-        Modified code with a run_task function added
-    """
-    wrapper = '''
-
-# === EVOLVER WRAPPER ===
-# This wrapper is added by agent_evolver to provide the run_task interface
-
-def run_task(task: str, model_name: str, docker: "DockerManager") -> dict:
-    """Run a self evolving multi agent task using SelfEvolvingMultiAgent.
-
-    This is a wrapper function for the evolver that uses the SelfEvolvingMultiAgent
-    class defined above.
-
-    Args:
-        task: The task description
-        model_name: The LLM model to use
-        docker: The Docker manager for execution
-
-    Returns:
-        Dictionary with result and metrics
-    """
-    # Create agent with the provided docker instance
-    agent = SelfEvolvingMultiAgent(
-        model_name=model_name,
-        max_steps=30,
-        max_budget=1.5,
-    )
-
-    # Override the docker manager
-    agent.docker = docker
-
-    # Reset state
-    agent.state = AgentState()
-    agent.trajectory = []
-
-    # Setup workspace is already done by the evolver
-    docker.workdir = "/workspace"
-
-    # Create orchestrator agent
-    orchestrator = KISSAgent(name="Multi Agent Orchestrator")
-
-    try:
-        result = orchestrator.run(
-            model_name=agent.model_name,
-            prompt_template=ORCHESTRATOR_PROMPT,
-            arguments={
-                "task": task,
-                "todo_list": agent._format_todo_list(),
-                "completed_tasks": agent._format_completed_tasks(),
-                "last_error": agent.state.last_error or "None",
-            },
-            tools=agent._create_tools(),
-            max_steps=agent.max_steps,
-            max_budget=agent.max_budget,
-        )
-
-        # Return metrics for the evolver
-        return {
-            "result": result,
-            "metrics": {
-                "llm_calls": len(agent.state.completed_tasks) + 1,  # sub-agents + orchestrator
-                "steps": len(agent.state.completed_tasks),
-            },
-            "stats": agent.get_stats(),
-        }
-
-    except Exception as e:
-        return {
-            "result": str(e),
-            "metrics": {"llm_calls": 10, "steps": 0},  # Penalize errors
-            "error": str(e),
-        }
-'''
-    return agent_code + wrapper
-
-
-# Load the base agent code from the actual file
-# This ensures the evolver always uses the current implementation
-_RAW_AGENT_CODE = _load_base_agent_code()
-BASE_AGENT_CODE = _create_run_task_wrapper(_RAW_AGENT_CODE)
 
 
 @dataclass
@@ -154,8 +64,6 @@ class EvaluationTask:
     name: str
     description: str
     test_script: str  # Python script that returns True if task succeeded
-    expected_files: list[str]  # Files that should exist after completion
-    timeout: int = 300  # Timeout in seconds
     complexity: str = "simple"  # simple, medium, long_horizon
 
 
@@ -185,8 +93,6 @@ else:
     print(f"FAIL: Got {nums}")
     exit(1)
 """,
-        expected_files=["fibonacci.txt", "fib.py"],
-        timeout=120,
         complexity="simple",
     ),
     # Medium complexity - multiple files and data processing
@@ -245,11 +151,6 @@ if stats['count'] != len(processed):
 print("PASS")
 exit(0)
 """,
-        expected_files=[
-            "generator.py", "processor.py", "analyzer.py",
-            "raw_data.txt", "processed.txt", "stats.json",
-        ],
-        timeout=300,
         complexity="medium",
     ),
     # Long-horizon task - full project with testing
@@ -321,10 +222,6 @@ if len(content) < 50:
 print("PASS")
 exit(0)
 """,
-        expected_files=[
-            "calculator.py", "test_calculator.py", "main.py", "demo_output.txt"
-        ],
-        timeout=360,
         complexity="long_horizon",
     ),
     # Long-horizon task - web scraper simulation with multiple components
@@ -405,445 +302,638 @@ if len(report) < 100:
 print("PASS")
 exit(0)
 """,
-        expected_files=[
-            "text_utils.py", "file_handler.py", "analyzer.py", "test_utils.py",
-            "sample.txt", "analysis.json", "report.txt",
-        ],
-        timeout=420,
+        complexity="long_horizon",
+    ),
+    # Very complex long-horizon task - full E-Commerce backend
+    EvaluationTask(
+        name="ecommerce_backend",
+        description="""
+        Build a complete E-Commerce Backend System:
+
+        1. Core API (src/api/):
+           - FastAPI application with JWT authentication (register, login, refresh)
+           - Password hashing with bcrypt
+           - Role-based access control (admin, seller, customer)
+
+        2. Database models (SQLAlchemy + SQLite):
+           - User (id, email, password_hash, role, created_at)
+           - Product (id, name, description, price, stock, seller_id, category_id)
+           - Category (id, name, parent_id for nested categories)
+           - Order (id, customer_id, status, total, created_at)
+           - OrderItem (id, order_id, product_id, quantity, unit_price)
+           - Cart (id, customer_id) and CartItem (id, cart_id, product_id, quantity)
+
+        3. API Endpoints:
+           - POST /auth/register, POST /auth/login - Authentication
+           - GET /products - List with pagination, search, filter by category
+           - POST /products - Create product (seller only)
+           - GET /cart, POST /cart/items - Cart management
+           - POST /orders/checkout - Create order from cart (validates stock)
+           - GET /orders - List user's orders
+
+        4. Business Logic (src/services/):
+           - InventoryService: Check stock, reserve during checkout
+           - PricingService: Calculate totals, bulk discounts (10+ items = 5% off)
+
+        5. Testing (tests/):
+           - At least 15 tests covering auth, products, cart, orders
+           - All tests must pass
+
+        6. Scripts:
+           - scripts/seed_db.py: Create sample users, categories, products
+           - requirements.txt with all dependencies
+           - config.py with JWT settings
+
+        Run seed script and all tests.
+        """,
+        test_script="""
+import os
+import sys
+import subprocess
+
+errors = []
+
+# Check for key files
+key_patterns = ['main.py', 'requirements.txt']
+for pattern in key_patterns:
+    found = False
+    for root, dirs, files in os.walk('.'):
+        if pattern in files:
+            found = True
+            break
+    if not found:
+        errors.append(f"Missing: {pattern}")
+
+# Check for database/models
+db_found = False
+for root, dirs, files in os.walk('src'):
+    for f in files:
+        if f.endswith('.py'):
+            path = os.path.join(root, f)
+            try:
+                with open(path) as file:
+                    content = file.read()
+                    if 'User' in content and 'Product' in content:
+                        db_found = True
+                        break
+            except:
+                pass
+if not db_found:
+    errors.append("Missing User/Product models")
+
+# Check for auth
+auth_found = False
+for root, dirs, files in os.walk('src'):
+    for f in files:
+        if f.endswith('.py'):
+            try:
+                with open(os.path.join(root, f)) as file:
+                    if 'jwt' in file.read().lower():
+                        auth_found = True
+                        break
+            except:
+                pass
+if not auth_found:
+    errors.append("JWT auth not found")
+
+# Install and run tests
+try:
+    subprocess.run(['pip', 'install', '-q', '-r', 'requirements.txt'],
+                   capture_output=True, timeout=180)
+    subprocess.run(['pip', 'install', '-q', 'pytest', 'httpx'],
+                   capture_output=True, timeout=60)
+    result = subprocess.run(['python', '-m', 'pytest', '-v', '--tb=short'],
+                            capture_output=True, text=True, timeout=300)
+    import re
+    match = re.search(r'(\\d+) passed', result.stdout)
+    passed = int(match.group(1)) if match else 0
+    if passed < 10:
+        errors.append(f"Only {passed} tests passed, expected at least 10")
+    else:
+        print(f"Tests: {passed} passed")
+except Exception as e:
+    errors.append(f"Test error: {e}")
+
+if errors:
+    print("FAIL:")
+    for e in errors:
+        print(f"  - {e}")
+    exit(1)
+print("PASS")
+exit(0)
+""",
+        complexity="long_horizon",
+    ),
+    # Very complex: Full-stack blog platform
+    EvaluationTask(
+        name="blog_platform",
+        description="""
+        Build a complete blog platform with the following:
+
+        1. Backend API (src/api/):
+           - FastAPI with user authentication (register, login with JWT)
+           - SQLAlchemy models: User, Post, Comment, Tag, PostTag (many-to-many)
+           - Endpoints:
+             * POST /users/register, POST /users/login
+             * GET/POST /posts (list with pagination, create)
+             * GET/PUT/DELETE /posts/{id} (author only can edit/delete)
+             * POST /posts/{id}/comments (authenticated users)
+             * GET /posts/{id}/comments
+             * GET /tags, GET /tags/{name}/posts
+           - Posts support markdown content and multiple tags
+
+        2. Services (src/services/):
+           - SearchService: Full-text search in post titles and content
+           - StatsService: Post views count, popular posts, author statistics
+
+        3. CLI (src/cli/):
+           - Create admin user
+           - List all posts with stats
+           - Export posts to JSON
+
+        4. Tests (tests/):
+           - At least 12 tests for auth, posts, comments, tags
+           - Test search functionality
+
+        5. Scripts:
+           - seed_db.py: Create 2 users, 5 posts with tags, 10 comments
+           - requirements.txt, config.py
+
+        Seed the database and run all tests.
+        """,
+        test_script="""
+import os
+import subprocess
+
+errors = []
+
+# Check key components exist
+for pattern in ['requirements.txt']:
+    if not os.path.exists(pattern):
+        errors.append(f"Missing {pattern}")
+
+# Check for models
+models_found = {'User': False, 'Post': False, 'Comment': False, 'Tag': False}
+for root, dirs, files in os.walk('src'):
+    for f in files:
+        if f.endswith('.py'):
+            try:
+                with open(os.path.join(root, f)) as file:
+                    content = file.read()
+                    for model in models_found:
+                        if f'class {model}' in content:
+                            models_found[model] = True
+            except:
+                pass
+missing = [m for m, found in models_found.items() if not found]
+if missing:
+    errors.append(f"Missing models: {missing}")
+
+# Run tests
+try:
+    subprocess.run(['pip', 'install', '-q', '-r', 'requirements.txt'],
+                   capture_output=True, timeout=180)
+    subprocess.run(['pip', 'install', '-q', 'pytest', 'httpx'],
+                   capture_output=True, timeout=60)
+    result = subprocess.run(['python', '-m', 'pytest', '-v', '--tb=short'],
+                            capture_output=True, text=True, timeout=300)
+    import re
+    match = re.search(r'(\\d+) passed', result.stdout)
+    passed = int(match.group(1)) if match else 0
+    if passed < 8:
+        errors.append(f"Only {passed} tests passed, expected at least 8")
+    else:
+        print(f"Tests: {passed} passed")
+except Exception as e:
+    errors.append(f"Test error: {e}")
+
+if errors:
+    print("FAIL:")
+    for e in errors:
+        print(f"  - {e}")
+    exit(1)
+print("PASS")
+exit(0)
+""",
+        complexity="long_horizon",
+    ),
+    # Very complex: Task scheduler system
+    EvaluationTask(
+        name="task_scheduler",
+        description="""
+        Build a distributed task scheduler system:
+
+        1. Core (src/core/):
+           - Task model: id, name, cron_expression, handler, status, last_run, next_run
+           - TaskQueue: Priority queue for pending tasks
+           - CronParser: Parse cron expressions to calculate next run time
+
+        2. Scheduler (src/scheduler/):
+           - Scheduler class that:
+             * Loads tasks from SQLite database
+             * Calculates next run times from cron expressions
+             * Executes tasks when due (run Python functions by name)
+             * Tracks execution history (TaskExecution model)
+             * Handles task failures with retry logic (max 3 retries)
+
+        3. API (src/api/):
+           - FastAPI endpoints:
+             * GET /tasks - List all tasks with status
+             * POST /tasks - Create new scheduled task
+             * PUT /tasks/{id} - Update task (pause/resume)
+             * DELETE /tasks/{id} - Remove task
+             * GET /tasks/{id}/history - Execution history
+             * POST /tasks/{id}/run - Manually trigger task
+
+        4. Sample Tasks (src/tasks/):
+           - cleanup_task.py: Delete old files
+           - report_task.py: Generate daily report
+           - health_check.py: Check system status
+
+        5. Tests (tests/):
+           - Test cron parser (every minute, hourly, daily, weekly)
+           - Test task execution and retry logic
+           - Test API endpoints
+           - At least 10 tests
+
+        6. Files:
+           - requirements.txt, config.py
+           - seed_db.py: Create sample scheduled tasks
+
+        Seed database and run tests.
+        """,
+        test_script="""
+import os
+import subprocess
+
+errors = []
+
+# Check requirements
+if not os.path.exists('requirements.txt'):
+    errors.append("Missing requirements.txt")
+
+# Check for scheduler components
+scheduler_found = False
+cron_found = False
+for root, dirs, files in os.walk('src'):
+    for f in files:
+        if f.endswith('.py'):
+            try:
+                with open(os.path.join(root, f)) as file:
+                    content = file.read()
+                    if 'Scheduler' in content or 'scheduler' in content.lower():
+                        scheduler_found = True
+                    if 'cron' in content.lower():
+                        cron_found = True
+            except:
+                pass
+if not scheduler_found:
+    errors.append("Scheduler not found")
+if not cron_found:
+    errors.append("Cron parsing not found")
+
+# Run tests
+try:
+    subprocess.run(['pip', 'install', '-q', '-r', 'requirements.txt'],
+                   capture_output=True, timeout=180)
+    subprocess.run(['pip', 'install', '-q', 'pytest', 'httpx'],
+                   capture_output=True, timeout=60)
+    result = subprocess.run(['python', '-m', 'pytest', '-v', '--tb=short'],
+                            capture_output=True, text=True, timeout=300)
+    import re
+    match = re.search(r'(\\d+) passed', result.stdout)
+    passed = int(match.group(1)) if match else 0
+    if passed < 6:
+        errors.append(f"Only {passed} tests passed, expected at least 6")
+    else:
+        print(f"Tests: {passed} passed")
+except Exception as e:
+    errors.append(f"Test error: {e}")
+
+if errors:
+    print("FAIL:")
+    for e in errors:
+        print(f"  - {e}")
+    exit(1)
+print("PASS")
+exit(0)
+""",
+        complexity="long_horizon",
+    ),
+    # Very complex: ML pipeline system
+    EvaluationTask(
+        name="ml_pipeline",
+        description="""
+        Build a machine learning pipeline system:
+
+        1. Data Layer (src/data/):
+           - DataLoader: Load CSV files, handle missing values
+           - DataSplitter: Train/test/validation splits
+           - FeatureExtractor: Numeric scaling, categorical encoding
+
+        2. Models (src/models/):
+           - BaseModel: Abstract class with fit, predict, evaluate methods
+           - LinearRegressor: Simple linear regression from scratch
+           - DecisionTree: Basic decision tree classifier from scratch
+           - ModelRegistry: Save/load models with versioning
+
+        3. Pipeline (src/pipeline/):
+           - Pipeline class that chains: load -> preprocess -> train -> evaluate
+           - Support for cross-validation
+           - Metrics: accuracy, precision, recall, MSE, R2
+
+        4. API (src/api/):
+           - FastAPI endpoints:
+             * POST /datasets - Upload CSV dataset
+             * GET /datasets - List datasets
+             * POST /train - Train model on dataset
+             * POST /predict - Make predictions
+             * GET /models - List trained models with metrics
+
+        5. CLI (src/cli/):
+           - Train model from command line
+           - Evaluate model on test data
+           - Export predictions to CSV
+
+        6. Tests (tests/):
+           - Test data loading and preprocessing
+           - Test model training and prediction
+           - Test pipeline end-to-end
+           - At least 10 tests
+
+        7. Sample Data:
+           - Create sample_data.csv with 100 rows, 5 features
+           - requirements.txt (no sklearn allowed - implement from scratch)
+
+        Run tests to verify pipeline works.
+        """,
+        test_script="""
+import os
+import subprocess
+
+errors = []
+
+if not os.path.exists('requirements.txt'):
+    errors.append("Missing requirements.txt")
+
+# Check for ML components
+components = {'DataLoader': False, 'Pipeline': False, 'predict': False}
+for root, dirs, files in os.walk('src'):
+    for f in files:
+        if f.endswith('.py'):
+            try:
+                with open(os.path.join(root, f)) as file:
+                    content = file.read()
+                    for comp in components:
+                        if comp in content:
+                            components[comp] = True
+            except:
+                pass
+missing = [c for c, found in components.items() if not found]
+if missing:
+    errors.append(f"Missing components: {missing}")
+
+# Run tests
+try:
+    subprocess.run(['pip', 'install', '-q', '-r', 'requirements.txt'],
+                   capture_output=True, timeout=180)
+    subprocess.run(['pip', 'install', '-q', 'pytest', 'httpx', 'numpy', 'pandas'],
+                   capture_output=True, timeout=60)
+    result = subprocess.run(['python', '-m', 'pytest', '-v', '--tb=short'],
+                            capture_output=True, text=True, timeout=300)
+    import re
+    match = re.search(r'(\\d+) passed', result.stdout)
+    passed = int(match.group(1)) if match else 0
+    if passed < 6:
+        errors.append(f"Only {passed} tests passed, expected at least 6")
+    else:
+        print(f"Tests: {passed} passed")
+except Exception as e:
+    errors.append(f"Test error: {e}")
+
+if errors:
+    print("FAIL:")
+    for e in errors:
+        print(f"  - {e}")
+    exit(1)
+print("PASS")
+exit(0)
+""",
         complexity="long_horizon",
     ),
 ]
 
 
+COMPLEXITY_WEIGHTS = {"simple": 1.0, "medium": 2.0, "long_horizon": 3.0}
 
 
 def evaluate_agent_code(
     agent_code: str,
     tasks: list[EvaluationTask],
-    model_name: str,
 ) -> dict[str, Any]:
-    """Evaluate agent code on a set of tasks.
-
-    Fitness is computed based on:
-    1. Task accuracy (primary - 60% weight)
-    2. Efficiency: fewer LLM calls (20% weight)
-    3. Speed: faster completion (10% weight)
-    4. Complexity bonus: harder tasks worth more (10% weight)
-
-    Args:
-        agent_code: The Python code for the agent
-        tasks: List of evaluation tasks
-        model_name: LLM model to use
-
-    Returns:
-        Dictionary with fitness and metrics
-    """
+    """Evaluate agent code on tasks. Returns fitness and metrics."""
+    n = len(tasks)
     results: dict[str, Any] = {
         "fitness": 0.0,
-        "metrics": {
-            "tasks_passed": 0,
-            "tasks_total": len(tasks),
-            "total_time": 0.0,
-            "avg_time": 0.0,
-            "total_llm_calls": 0,
-            "avg_llm_calls": 0.0,
-            "efficiency_score": 0.0,
-        },
+        "metrics": {"tasks_passed": 0, "tasks_total": n, "total_time": 0.0,
+                    "avg_time": 0.0, "total_llm_calls": 0, "avg_llm_calls": 0.0,
+                    "efficiency_score": 0.0},
         "artifacts": {},
         "error": None,
     }
 
-    # Create a namespace to exec the agent code
     namespace: dict[str, Any] = {}
-
     try:
-        # Execute the agent code to get the run_task function
         exec(agent_code, namespace)
         run_task_fn = namespace.get("run_task")
-        if run_task_fn is None:
+        if not run_task_fn:
             results["error"] = "Agent code does not define run_task function"
             return results
     except Exception as e:
         results["error"] = f"Failed to compile agent code: {e}"
         return results
 
-    passed = 0
-    total_time = 0.0
-    total_llm_calls = 0
-    complexity_score = 0.0
-    max_complexity_score = 0.0
-
-    # Complexity weights for different task types
-    complexity_weights = {
-        "simple": 1.0,
-        "medium": 2.0,
-        "long_horizon": 3.0,
-    }
+    passed, total_time, total_llm_calls = 0, 0.0, 0
+    complexity_score, max_complexity = 0.0, 0.0
 
     for task in tasks:
+        weight = COMPLEXITY_WEIGHTS.get(task.complexity, 1.0)
+        max_complexity += weight
         task_start = time.time()
-        task_passed = False
-        task_llm_calls = 0
-        task_complexity = complexity_weights.get(task.complexity, 1.0)
-        max_complexity_score += task_complexity
+        task_passed, llm_calls = False, 10  # default penalty
 
         try:
-            with DockerManager("python:3.12-slim", workdir="/") as docker:
-                # Setup workspace - create directory first, then change workdir
-                docker.run_bash_command("mkdir -p /workspace", "Creating workspace")
-                docker.workdir = "/workspace"
+            result = run_task_fn(task.description)
+            if isinstance(result, dict):
+                llm_calls = result.get("metrics", {}).get("llm_calls", 5)
+            else:
+                llm_calls = 5
+            total_llm_calls += llm_calls
 
-                # Run the agent and capture metrics
-                agent_result = run_task_fn(task.description, model_name, docker)
-
-                # Extract metrics if returned as dict
-                if isinstance(agent_result, dict):
-                    metrics = agent_result.get("metrics", {})
-                    task_llm_calls = metrics.get("llm_calls", 1)
-                else:
-                    # Estimate LLM calls if not provided (conservative estimate)
-                    task_llm_calls = 5
-
-                total_llm_calls += task_llm_calls
-
-                # Run the test script
-                docker.run_bash_command(
-                    f"cat > /tmp/test.py << 'EOF'\n{task.test_script}\nEOF",
-                    "Creating test script",
-                )
-                test_result = docker.run_bash_command(
-                    "python /tmp/test.py",
-                    "Running test",
-                )
-
-                if "PASS" in test_result:
+            with DockerManager(
+                "python:3.12-slim", workdir="/workspace", mount_shared_volume=True
+            ) as docker:
+                script = f"cat > /tmp/test.py << 'EOF'\n{task.test_script}\nEOF"
+                docker.run_bash_command(script, "Test setup")
+                if "PASS" in docker.run_bash_command("python /tmp/test.py", "Test"):
                     task_passed = True
                     passed += 1
-                    complexity_score += task_complexity
-
+                    complexity_score += weight
         except Exception as e:
             results["artifacts"][task.name] = f"Error: {e}"
-            task_llm_calls = 10  # Penalize errors with high LLM call estimate
 
         task_time = time.time() - task_start
         total_time += task_time
-        results["artifacts"][task.name] = {
-            "passed": task_passed,
-            "time": task_time,
-            "llm_calls": task_llm_calls,
-            "complexity": task.complexity,
-        }
+        results["artifacts"][task.name] = {"passed": task_passed, "time": task_time,
+                                            "llm_calls": llm_calls, "complexity": task.complexity}
 
-    # Calculate metrics
-    results["metrics"]["tasks_passed"] = passed
-    results["metrics"]["total_time"] = total_time
-    results["metrics"]["avg_time"] = total_time / len(tasks) if tasks else 0
-    results["metrics"]["total_llm_calls"] = total_llm_calls
-    results["metrics"]["avg_llm_calls"] = total_llm_calls / len(tasks) if tasks else 0
+    # Metrics
+    m = results["metrics"]
+    m["tasks_passed"], m["total_time"], m["total_llm_calls"] = passed, total_time, total_llm_calls
+    m["avg_time"] = total_time / n if n else 0
+    m["avg_llm_calls"] = total_llm_calls / n if n else 0
 
-    # Calculate fitness components
-    # 1. Accuracy score (60% weight) - weighted by task complexity
-    accuracy_score = complexity_score / max_complexity_score if max_complexity_score > 0 else 0
-
-    # 2. Efficiency score (20% weight) - fewer LLM calls is better
-    # Baseline: assume 10 LLM calls per task is average, fewer is better
-    avg_calls = total_llm_calls / len(tasks) if tasks else 10
-    # Score: 1.0 if avg_calls <= 3, decreases to 0.0 at avg_calls >= 15
-    efficiency_score = max(0, min(1, (15 - avg_calls) / 12))
-    results["metrics"]["efficiency_score"] = efficiency_score
-
-    # 3. Speed score (10% weight) - faster is better
-    # Baseline: assume 120 seconds per task is average
-    avg_time = total_time / len(tasks) if tasks else 120
-    # Score: 1.0 if avg_time <= 30s, decreases to 0.0 at avg_time >= 180s
-    speed_score = max(0, min(1, (180 - avg_time) / 150))
-
-    # 4. Complexity bonus (10% weight) - reward passing harder tasks
-    # Already factored into accuracy_score via complexity weights
-
-    # Combined fitness with weights
-    results["fitness"] = (
-        accuracy_score * 0.60 +      # Primary: task accuracy
-        efficiency_score * 0.25 +    # Secondary: LLM efficiency
-        speed_score * 0.15           # Tertiary: speed
-    )
+    # Fitness: accuracy (60%) + efficiency (25%) + speed (15%)
+    accuracy = complexity_score / max_complexity if max_complexity else 0
+    efficiency = max(0, min(1, (15 - m["avg_llm_calls"]) / 12))
+    speed = max(0, min(1, (180 - m["avg_time"]) / 150))
+    m["efficiency_score"] = efficiency
+    results["fitness"] = accuracy * 0.60 + efficiency * 0.25 + speed * 0.15
 
     return results
 
 
-def create_code_agent_wrapper(model_name: str) -> Callable[..., str]:
-    """Create a code agent wrapper for KISSEvolve.
-
-    Args:
-        model_name: The LLM model to use for code generation
-
-    Returns:
-        A function that generates code variations
-    """
-
-    def code_agent_wrapper(
+def create_code_agent_wrapper(default_model: str) -> Callable[..., str]:
+    """Create a code agent wrapper for KISSEvolve."""
+    def wrapper(
         prompt_template: str,
         arguments: dict[str, str],
-        model_name: str = model_name,
+        model_name: str | None = None,
     ) -> str:
-        """Generate code using an LLM agent."""
-        agent = KISSAgent(name="CodeEvolver")
-        result = agent.run(
-            model_name=model_name,
+        return KISSAgent(name="CodeEvolver").run(
+            model_name=model_name or default_model,
             prompt_template=prompt_template,
             arguments=arguments,
             is_agentic=True,
             max_steps=100,
             max_budget=10.0,
         )
-        return result
-
-    return code_agent_wrapper
+    return wrapper
 
 
 class AgentEvolver:
-    """Evolves the SelfEvolvingMultiAgent for better efficiency and accuracy.
-
-    The evolver optimizes for:
-    1. Fewer LLM calls - reduce token usage and API costs
-    2. Lower budget consumption - efficient resource usage
-    3. Accurate completion of long-horizon tasks - maintain correctness
-    """
+    """Evolves agent code for efficiency and accuracy."""
 
     def __init__(
         self,
+        package_name: str,
+        agent_file_path: str,
         model_name: str | None = None,
-        population_size: int | None = None,
-        max_generations: int | None = None,
-        mutation_rate: float | None = None,
-        elite_size: int | None = None,
         tasks: list[EvaluationTask] | None = None,
         focus_on_efficiency: bool = True,
     ):
-        """Initialize the evolver.
-
-        Args:
-            model_name: LLM model to use
-            population_size: Number of variants per generation
-            max_generations: Maximum generations
-            mutation_rate: Probability of mutation
-            elite_size: Number of elite variants to keep
-            tasks: Evaluation tasks (defaults to EVALUATION_TASKS)
-            focus_on_efficiency: Whether to prioritize efficiency optimization
-        """
         cfg = DEFAULT_CONFIG.self_evolving_multi_agent  # type: ignore[attr-defined]
+        evolve_cfg = DEFAULT_CONFIG.kiss_evolve  # type: ignore[attr-defined]
 
         self.model_name = get_config_value(model_name, cfg, "evolver_model")
-        self.population_size = get_config_value(population_size, cfg, "evolver_population_size")
-        self.max_generations = get_config_value(max_generations, cfg, "evolver_max_generations")
-        self.mutation_rate = get_config_value(mutation_rate, cfg, "evolver_mutation_rate")
-        self.elite_size = get_config_value(elite_size, cfg, "evolver_elite_size")
-        self.tasks = tasks if tasks is not None else EVALUATION_TASKS
+        self.population_size = evolve_cfg.population_size
+        self.max_generations = evolve_cfg.max_generations
+        self.mutation_rate = evolve_cfg.mutation_rate
+        self.elite_size = evolve_cfg.elite_size
+        self.tasks = tasks or EVALUATION_TASKS
         self.focus_on_efficiency = focus_on_efficiency
+        self.agent_file_path = agent_file_path
+        self.base_agent_code = _load_base_agent_code(package_name, agent_file_path)
 
     def evolve(self) -> CodeVariant:
-        """Run the evolutionary optimization.
+        """Run the evolutionary optimization."""
+        print(f"Evolving: model={self.model_name}, pop={self.population_size}, "
+              f"gens={self.max_generations}, tasks={len(self.tasks)}")
 
-        Returns:
-            The best code variant found
-        """
-        print("=" * 60)
-        print("Self Evolving Multi Agent Evolver")
-        print("=" * 60)
-        print(f"Model: {self.model_name}")
-        print(f"Population: {self.population_size}")
-        print(f"Generations: {self.max_generations}")
-        print(f"Tasks: {len(self.tasks)}")
-        print(f"Focus: {'Efficiency + Accuracy' if self.focus_on_efficiency else 'Accuracy'}")
-        print()
-
-        # Print task breakdown
-        for task in self.tasks:
-            print(f"  - {task.name} ({task.complexity})")
-        print()
-
-        def evaluation_fn(code: str) -> dict[str, Any]:
-            return evaluate_agent_code(code, self.tasks, self.model_name)
-
-        # Efficiency-focused optimization instructions
         efficiency_instructions = """
-## Primary Optimization Goals ##
-Your goal is to evolve the coding agent to be MORE EFFICIENT while maintaining accuracy.
+## Optimization Goals ##
+Evolve the multi-agent to be MORE EFFICIENT while maintaining accuracy.
 
-### Key Efficiency Improvements ###
-1. **Reduce LLM Calls**
-   - Combine multiple small tasks into single comprehensive plans
-   - Execute multiple bash commands in sequence without intermediate LLM calls
-   - Avoid unnecessary verification steps that require LLM reasoning
-   - Use direct execution instead of sub-agents when tasks are simple
+### Key Improvements ###
+1. Reduce LLM calls - batch operations, use direct tools for simple tasks
+2. Optimize planning - comprehensive upfront plans, group related operations
+3. Streamline prompts - concise but complete
+4. You can change the agent architecture to be more efficient, but you have
+   to use KISSAgent API to create and run agents.
+5. You can also modify the agent architecture to be more scalable and robust for
+   very very long-horizon tasks.
+6. Smart sub-agent usage - only for complex sub-tasks
+7. You can also allow sub-agents to plan their own tasks and execute them
+   with their own tools and sub-agents.
+8. You can search the web for information about various agentic patterns
+   that solves long-horizon tasks scalably, efficiently and accurately.
 
-2. **Optimize Planning**
-   - Create comprehensive plans upfront that don't require replanning
-   - Group related file operations together
-   - Minimize back-and-forth between planning and execution
-
-3. **Streamline Prompts**
-   - Keep prompts concise but complete
-   - Remove redundant instructions
-   - Focus on actionable guidance
-
-4. **Smart Sub-Agent Usage**
-   - Only use sub-agents for truly complex sub-tasks
-   - For simple file writes or commands, use direct tools
-   - Reduce sub-agent max_steps and max_budget
-
-5. **Batch Operations**
-   - Write multiple files in a single script when possible
-   - Run test commands together
-   - Combine related bash commands
-
-### Code Structure Guidelines ###
-- The run_task function must return a dict with 'result' and 'metrics' keys
-- metrics should include 'llm_calls' to track efficiency
-- Maintain the core planning/execution architecture but optimize it
-- Keep error handling but make it lightweight
-
-### What NOT to Change ###
-- Don't remove essential error handling
-- Don't skip verification for complex tasks
-- Don't sacrifice accuracy for speed
-- Keep the basic tool interface (run_bash, read_file, write_file)
+### Code Structure ###
+- run_task must return dict with 'result' and 'metrics' (including 'llm_calls')
+- Keep error handling lightweight
+- Keep tool interface (run_bash, read_file, write_file)
+"""
+        accuracy_instructions = """
+Focus on: task understanding, error recovery, code verification, long-horizon tasks.
 """
 
+        if self.focus_on_efficiency:
+            instructions = efficiency_instructions
+        else:
+            instructions = accuracy_instructions
         evolver = KISSEvolve(
             code_agent_wrapper=create_code_agent_wrapper('gemini-3-pro-preview'),
-            initial_code=BASE_AGENT_CODE,
-            evaluation_fn=evaluation_fn,
+            initial_code=self.base_agent_code,
+            evaluation_fn=lambda code: evaluate_agent_code(code, self.tasks),
             model_names=[(self.model_name, 1.0)],
             population_size=self.population_size,
             max_generations=self.max_generations,
             mutation_rate=self.mutation_rate,
             elite_size=self.elite_size,
-            extra_coding_instructions=efficiency_instructions if self.focus_on_efficiency else """
-Focus on improving the agent's:
-1. Task understanding and planning
-2. Error handling and recovery
-3. Code verification before finishing
-4. Handling of long-horizon multi-step tasks
-""",
+            extra_coding_instructions=instructions,
         )
 
         best = evolver.evolve()
-
-        print("\n" + "=" * 60)
-        print("EVOLUTION COMPLETE")
-        print("=" * 60)
-        print(f"Best fitness: {best.fitness:.4f}")
-        print(f"Metrics: {best.metrics}")
-        if best.metrics:
-            passed = best.metrics.get('tasks_passed', 'N/A')
-            total = best.metrics.get('tasks_total', 'N/A')
-            print(f"  - Tasks passed: {passed}/{total}")
-            print(f"  - Avg LLM calls: {best.metrics.get('avg_llm_calls', 'N/A'):.1f}")
-            eff = best.metrics.get('efficiency_score', 'N/A')
-            print(f"  - Efficiency score: {eff:.3f}")
-
+        m = best.metrics or {}
+        passed, total = m.get('tasks_passed'), m.get('tasks_total')
+        print(f"Done: fitness={best.fitness:.4f}, passed={passed}/{total}, "
+              f"avg_llm={m.get('avg_llm_calls', 0):.1f}")
         return best
 
-    def save_best(self, variant: CodeVariant, path: str = "evolved_agent.py") -> None:
-        """Save the best variant to a file.
-
-        Args:
-            variant: The code variant to save
-            path: Output file path
-        """
+    def save_best(self, variant: CodeVariant, path: str | None = None) -> None:
+        """Save the best variant to a file."""
+        if path is None:
+            output_dir = Path(DEFAULT_CONFIG.agent.artifact_dir) / "self_evolving_multi_agent"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            path = str(output_dir / self.agent_file_path)
         Path(path).write_text(variant.code)
-        print(f"Saved best variant to {path}")
+        print(f"Saved to {path}")
 
     def run_baseline_evaluation(self) -> dict[str, Any]:
-        """Run evaluation on the base agent code to establish baseline.
-
-        Returns:
-            Baseline evaluation results
-        """
-        print("Running baseline evaluation...")
-        results = evaluate_agent_code(BASE_AGENT_CODE, self.tasks, self.model_name)
-        print(f"Baseline fitness: {results['fitness']:.4f}")
-        print(f"Baseline metrics: {results['metrics']}")
+        """Run evaluation on base agent code to establish baseline."""
+        results = evaluate_agent_code(self.base_agent_code, self.tasks)
+        print(f"Baseline: fitness={results['fitness']:.4f}, metrics={results['metrics']}")
         return results
 
 
 def main() -> None:
-    """Main entry point for the Coding Agent Evolver.
-
-    This evolves the SelfEvolvingMultiAgent to optimize for:
-    - Fewer LLM calls
-    - Lower token/budget usage
-    - Accurate completion of long-horizon coding tasks
-    """
+    """Evolve SelfEvolvingMultiAgent for efficiency and accuracy."""
     config = DEFAULT_CONFIG.self_evolving_multi_agent  # type: ignore[attr-defined]
 
-    print("=" * 70)
-    print("Self Evolving Multi Agent Evolver")
-    print("Optimizing for: Efficiency + Accuracy on Long-Horizon Tasks")
-    print("=" * 70)
-
-    if config.evolver_test_only:
-        # Just test the base agent
-        print("\nRunning baseline evaluation only...")
-        print("-" * 50)
-
-        # Test on a subset of tasks
-        test_tasks = [t for t in EVALUATION_TASKS if t.complexity in ["simple", "medium"]][:2]
-        result = evaluate_agent_code(
-            BASE_AGENT_CODE, test_tasks, config.evolver_model
-        )
-
-        print("\nBaseline Results:")
-        print(f"  Fitness: {result['fitness']:.4f}")
-        metrics = result['metrics']
-        print(f"  Tasks Passed: {metrics['tasks_passed']}/{metrics['tasks_total']}")
-        print(f"  Avg LLM Calls: {metrics['avg_llm_calls']:.1f}")
-        print(f"  Efficiency Score: {metrics['efficiency_score']:.3f}")
-        print(f"\nFull results:\n{json.dumps(result, indent=2)}")
-        return
-
-    # Create evolver with efficiency focus
     evolver = AgentEvolver(
+        package_name="kiss.agents.self_evolving_multi_agent",
+        agent_file_path="multi_agent.py",
         model_name=config.evolver_model,
-        population_size=config.evolver_population_size,
-        max_generations=config.evolver_max_generations,
         focus_on_efficiency=True,
     )
 
-    # Run baseline first
-    print("\n--- Baseline Evaluation ---")
     baseline = evolver.run_baseline_evaluation()
-
-    # Run evolution
-    print("\n--- Starting Evolution ---")
     best = evolver.evolve()
 
-    # Compare improvement
-    print("\n" + "=" * 70)
-    print("EVOLUTION SUMMARY")
-    print("=" * 70)
-    print(f"\nBaseline fitness: {baseline['fitness']:.4f}")
-    print(f"Evolved fitness:  {best.fitness:.4f}")
-    base_fitness = baseline['fitness']
-    if base_fitness > 0:
-        improvement = ((best.fitness - base_fitness) / base_fitness) * 100
-    else:
-        improvement = 0
+    improvement = ((best.fitness - baseline['fitness']) / baseline['fitness'] * 100
+                   if baseline['fitness'] > 0 else 0)
     print(f"Improvement: {improvement:+.1f}%")
-
-    if best.metrics:
-        print("\nEvolved Agent Metrics:")
-        passed = best.metrics.get('tasks_passed', 'N/A')
-        total = best.metrics.get('tasks_total', 'N/A')
-        print(f"  - Tasks passed: {passed}/{total}")
-        print(f"  - Avg LLM calls: {best.metrics.get('avg_llm_calls', 'N/A'):.1f}")
-        print(f"  - Efficiency score: {best.metrics.get('efficiency_score', 'N/A'):.3f}")
-        print(f"  - Avg time per task: {best.metrics.get('avg_time', 'N/A'):.1f}s")
-
-    # Save the best variant
-    evolver.save_best(best, config.evolver_output)
-    print(f"\nBest evolved agent saved to: {config.evolver_output}")
+    evolver.save_best(best)
 
 
 if __name__ == "__main__":

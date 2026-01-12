@@ -64,8 +64,13 @@ class Gemini3Model(Model):
             return ""
         return getattr(self.conversation[0].parts[0], "text", "") or ""
 
+    def _ensure_client_initialized(self) -> None:
+        """Lazily initialize the Gemini client if not already done."""
+        if self.client is None:
+            self.client = genai.Client(api_key=DEFAULT_CONFIG.agent.api_keys.GEMINI_API_KEY)
+
     def initialize(self, prompt: str) -> None:
-        self.client = genai.Client(api_key=DEFAULT_CONFIG.agent.api_keys.GEMINI_API_KEY)
+        self._ensure_client_initialized()
         self.conversation = [
             types.Content(
                 role="user", parts=[types.Part.from_text(text=self._append_usage_info(prompt))]
@@ -73,6 +78,7 @@ class Gemini3Model(Model):
         ]
 
     def generate_content_with_tools(self, function_map: dict[str, Callable[..., Any]]) -> Any:
+        self._ensure_client_initialized()
         assert self.client
         decls = self._get_tools(function_map)
         return self.client.models.generate_content(
@@ -105,6 +111,7 @@ class Gemini3Model(Model):
         )
 
     def generate(self) -> tuple[str, Any]:
+        self._ensure_client_initialized()
         assert self.client
         prompt = self._get_initial_prompt_text()
         if not prompt:
@@ -147,6 +154,7 @@ class Gemini3Model(Model):
         Returns:
             A list of floats representing the embedding vector.
         """
+        self._ensure_client_initialized()
         assert self.client
         model = embedding_model or "text-embedding-004"
         result = self.client.models.embed_content(model=model, contents=text)

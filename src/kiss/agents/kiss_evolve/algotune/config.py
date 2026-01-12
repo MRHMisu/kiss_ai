@@ -32,6 +32,10 @@ class AlgoTuneConfig(BaseModel):
         default=_DEFAULT_ALGOTUNE_PATH,
         description="Path to the AlgoTune repository",
     )
+    algotune_repo_url: str = Field(
+        default="https://github.com/oripress/AlgoTune.git",
+        description="Git URL for cloning the AlgoTune repository",
+    )
 
     # Problem generation settings
     num_test_problems: int = Field(
@@ -51,27 +55,9 @@ class AlgoTuneConfig(BaseModel):
         description="Random seed for reproducibility",
     )
 
-    # Evolution settings
-    population_size: int = Field(
-        default=4,
-        description="Population size for evolutionary optimization",
-    )
-    max_generations: int = Field(
-        default=3,
-        description="Maximum number of generations to evolve",
-    )
-    mutation_rate: float = Field(
-        default=0.8,
-        description="Probability of mutation vs crossover",
-    )
-    elite_size: int = Field(
-        default=1,
-        description="Number of best variants to preserve each generation",
-    )
-
     # Model settings
     model: str = Field(
-        default="gemini-2.5-pro",
+        default="gemini-3-flash-preview",
         description="Model to use for code generation",
     )
 

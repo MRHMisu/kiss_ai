@@ -202,7 +202,6 @@ class TestKISSEvolveIntegration(unittest.TestCase):
     def test_kiss_evolve_improves_performance(self):
         """Test that KISSEvolve improves performance over the initial code.
 
-        This test uses a real LLM (gemini-2.0-flash) to evolve the sorting algorithm.
         """
         from kiss.agents.kiss import get_run_simple_coding_agent
 
@@ -248,7 +247,6 @@ class TestKISSEvolveIntegration(unittest.TestCase):
     def test_kiss_evolve_population_stats(self):
         """Test that KISSEvolve maintains valid population statistics.
 
-        This test uses a real LLM (gemini-2.0-flash) to evolve the sorting algorithm.
         """
         from kiss.agents.kiss import get_run_simple_coding_agent
 

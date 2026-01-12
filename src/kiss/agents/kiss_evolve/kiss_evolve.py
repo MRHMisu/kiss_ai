@@ -179,37 +179,28 @@ class KISSEvolve:
 
         # Get config with fallback defaults
         cfg = getattr(DEFAULT_CONFIG, "kiss_evolve", None)
-        defaults = {
-            "population_size": 8, "max_generations": 10, "mutation_rate": 0.7,
-            "elite_size": 2, "num_islands": 1, "migration_frequency": 5,
-            "migration_size": 1, "migration_topology": "ring",
-            "enable_novelty_rejection": False, "novelty_threshold": 0.95,
-            "max_rejection_attempts": 5, "parent_sampling_method": "tournament",
-            "power_law_alpha": 1.0, "performance_novelty_lambda": 1.0,
-        }
 
-        def get_val(name: str, value: Any) -> Any:
-            if cfg:
-                return get_config_value(value, cfg, name, defaults[name])
-            return value if value is not None else defaults[name]
-
-        self.population_size = get_val("population_size", population_size)
-        self.max_generations = get_val("max_generations", max_generations)
-        self.mutation_rate = get_val("mutation_rate", mutation_rate)
-        self.elite_size = get_val("elite_size", elite_size)
-        self.num_islands = get_val("num_islands", num_islands)
-        self.migration_frequency = get_val("migration_frequency", migration_frequency)
-        self.migration_size = get_val("migration_size", migration_size)
-        self.migration_topology = get_val("migration_topology", migration_topology)
-        self.enable_novelty_rejection = get_val(
-            "enable_novelty_rejection", enable_novelty_rejection
+        self.population_size = get_config_value(population_size, cfg, "population_size")
+        self.max_generations = get_config_value(max_generations, cfg, "max_generations")
+        self.mutation_rate = get_config_value(mutation_rate, cfg, "mutation_rate")
+        self.elite_size = get_config_value(elite_size, cfg, "elite_size")
+        self.num_islands = get_config_value(num_islands, cfg, "num_islands")
+        self.migration_frequency = get_config_value(migration_frequency, cfg, "migration_frequency")
+        self.migration_size = get_config_value(migration_size, cfg, "migration_size")
+        self.migration_topology = get_config_value(migration_topology, cfg, "migration_topology")
+        self.enable_novelty_rejection = get_config_value(
+            enable_novelty_rejection, cfg, "enable_novelty_rejection"
         )
-        self.novelty_threshold = get_val("novelty_threshold", novelty_threshold)
-        self.max_rejection_attempts = get_val("max_rejection_attempts", max_rejection_attempts)
-        self.parent_sampling_method = get_val("parent_sampling_method", parent_sampling_method)
-        self.power_law_alpha = get_val("power_law_alpha", power_law_alpha)
-        self.performance_novelty_lambda = get_val(
-            "performance_novelty_lambda", performance_novelty_lambda
+        self.novelty_threshold = get_config_value(novelty_threshold, cfg, "novelty_threshold")
+        self.max_rejection_attempts = get_config_value(
+            max_rejection_attempts, cfg, "max_rejection_attempts"
+        )
+        self.parent_sampling_method = get_config_value(
+            parent_sampling_method, cfg, "parent_sampling_method"
+        )
+        self.power_law_alpha = get_config_value(power_law_alpha, cfg, "power_law_alpha")
+        self.performance_novelty_lambda = get_config_value(
+            performance_novelty_lambda, cfg, "performance_novelty_lambda"
         )
 
         self._validate_parameters()
@@ -549,7 +540,7 @@ combine the best aspects of two code variants to create an improved version.
         self.island_histories = []
 
         # Create initial variant for each island
-        for island_id in range(self.num_islands):
+        for _ in range(self.num_islands):
             initial_variant = CodeVariant(
                 code=self.initial_code,
                 id=self.variant_counter,

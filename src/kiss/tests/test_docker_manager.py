@@ -50,8 +50,8 @@ class TestDockerManager(unittest.TestCase):
                 f'cat "{client_file_path}"', "Read file written from host in container"
             )
             print(output)
-            start_tag = "----STDOUT-----\n"
-            end_tag = "\n----STDERR-----"
+            start_tag = "# ----STDOUT-----\n```\n"
+            end_tag = "\n```\n# ----STDERR-----"
             start_idx = output.find(start_tag)
             end_idx = output.find(end_tag)
             if start_idx != -1 and end_idx != -1:

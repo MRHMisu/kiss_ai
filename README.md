@@ -288,46 +288,28 @@ For usage examples, API reference, and configuration options, please see the [KI
 The Self-Evolving Multi-Agent is an advanced agent with planning, error recovery, dynamic tool creation, and the ability to evolve itself for better efficiency and accuracy.
 
 ```python
-from kiss.agents.self_evolving_multi_agent import (
-    SelfEvolvingMultiAgent,
-    run_self_evolving_multi_agent_task,
-)
+from kiss.agents.self_evolving_multi_agent import SelfEvolvingMultiAgent, run_task
 
-# Option 1: Using the convenience function
-result = run_self_evolving_multi_agent_task(
-    task="""
+# Option 1: Using the class directly
+agent = SelfEvolvingMultiAgent()
+result = agent.run("""
     Create a Python script that:
     1. Generates the first 20 Fibonacci numbers
     2. Saves them to 'fibonacci.txt'
     3. Reads the file and prints the sum
-    """,
-    model_name="gemini-3-flash-preview",
-    max_steps=30,
-    max_budget=1.0,
-)
-
-print(f"Status: {result['status']}")
-print(f"Result: {result['result']}")
-print(f"Stats: {result['stats']}")
-
-# Option 2: Using the class directly
-agent = SelfEvolvingMultiAgent(
-    model_name="gemini-3-flash-preview",
-    docker_image="python:3.12-slim",
-    max_steps=50,
-    max_budget=2.0,
-    enable_planning=True,
-    enable_error_recovery=True,
-    enable_dynamic_tools=True,
-)
-
-result = agent.run("Create a calculator module with tests")
+""")
 print(result)
 
 # Access execution statistics
 stats = agent.get_stats()
 print(f"Completed todos: {stats['completed']}/{stats['total_todos']}")
-print(f"Dynamic tools created: {stats['dynamic_tools_created']}")
+print(f"Dynamic tools created: {stats['dynamic_tools']}")
+
+# Option 2: Using run_task (for evolver integration)
+result = run_task("Create a calculator module with tests")
+print(f"Result: {result['result']}")
+print(f"Metrics: {result['metrics']}")
+print(f"Stats: {result['stats']}")
 ```
 
 For usage examples, API reference, and configuration options, please see the [Self-Evolving Multi-Agent README](src/kiss/agents/self_evolving_multi_agent/README.md).
