@@ -92,6 +92,7 @@ class TestKISSAgentBasic(unittest.TestCase):
             model_name=TEST_MODEL,
             prompt_template=(
                 "Calculate 7 * 8 using the 'simple_calculator' tool. "
+                "Then call 'finish' with the result. "
                 "You MUST make exactly one tool call in your response."
             ),
             tools=[simple_calculator],
@@ -134,6 +135,7 @@ class TestKISSAgentCustomFormatter(unittest.TestCase):
             model_name=TEST_MODEL,
             prompt_template=(
                 "Calculate 8934 * 2894 using the calculator tool. "
+                "Then call 'finish' with the result. "
                 "You MUST make exactly one tool call in your response."
             ),
             tools=[simple_calculator],
