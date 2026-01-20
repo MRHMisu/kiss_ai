@@ -2,7 +2,7 @@
 
 A simple and portable AI agent framework for building and evolving LLM agents. The framework follows the [KISS principle](https://en.wikipedia.org/wiki/KISS_principle) and provides native function calling for seamless tool integration.
 
-**Version:** 0.1.1 (see `kiss.__version__` or `src/kiss/_version.py`)  
+**Version:** 0.1.2 (see `kiss.__version__` or `src/kiss/_version.py`)  
 **Description:** KISS Agent Framework - A simple and portable agent framework for building and evolving AI agents  
 **Python:** >=3.13
 
@@ -314,6 +314,43 @@ print(f"Stats: {result['stats']}")
 
 For usage examples, API reference, and configuration options, please see the [Self-Evolving Multi-Agent README](src/kiss/agents/self_evolving_multi_agent/README.md).
 
+### Using Claude Coding Agent
+
+The Claude Coding Agent uses the Claude Agent SDK to generate tested Python programs with file system access controls:
+
+```python
+from kiss.agents.claudecodingagent import ClaudeCodingAgent
+
+# Create agent with path restrictions
+agent = ClaudeCodingAgent(
+    model_name="claude-sonnet-4-5",
+    readable_paths=["src/"],  # Allowed read paths
+    writable_paths=["output/"],  # Allowed write paths
+    base_dir="workdir"  # Base working directory
+)
+
+# Run a coding task
+import anyio
+
+async def main():
+    result = await agent.run("""
+        Write, test, and optimize a fibonacci function in Python
+        that is efficient and correct.
+    """)
+    if result:
+        print(f"Success: {result['status']}")
+        print(f"Summary: {result['summary']}")
+        print(f"Insights: {result['insights']}")
+
+anyio.run(main)
+```
+
+**Built-in Tools Available:**
+- `Read`, `Write`, `Edit`, `MultiEdit`: File operations
+- `Glob`, `Grep`: File search and content search
+- `Bash`: Shell command execution
+- `WebSearch`, `WebFetch`: Web access
+
 ### Running Agent Examples
 
 **Vulnerability Detector Agent (ARVO):**
@@ -528,6 +565,8 @@ kiss/
 │   │   │       ├── run_algotune.py # AlgoTune task evolution
 │   │   │       └── config.py       # AlgoTune configuration
 │   │   ├── kiss.py                 # Utility agents (prompt refiner, bash agent)
+│   │   ├── claudecodingagent/      # Claude Coding Agent using Claude Agent SDK
+│   │   │   └── claude_coding_agent.py
 │   │   ├── swe_agent_verified/     # SWE-bench Verified benchmark integration
 │   │   │   ├── run_swebench.py     # Main runner with CLI support
 │   │   │   ├── config.py           # Configuration for SWE-bench runs
@@ -571,7 +610,8 @@ kiss/
 │   │   ├── test_models_quick.py   # Quick tests for models based on ModelInfo capabilities
 │   │   ├── run_all_models_test.py # Comprehensive tests for all models
 │   │   ├── test_multiprocess.py
-│   │   └── test_internal.py
+│   │   ├── test_internal.py
+│   │   └── test_claude_coding_agent.py # Tests for Claude Coding Agent
 │   └── viz_trajectory/  # Trajectory visualization
 │       ├── server.py                    # Flask server for trajectory visualization
 │       ├── README.md                    # Trajectory visualizer documentation
@@ -609,9 +649,9 @@ Configuration is managed through environment variables and the `DEFAULT_CONFIG` 
   - `max_steps`: Maximum iterations in the ReAct loop (default: 100)
   - `verbose`: Enable verbose output (default: True)
   - `debug`: Enable debug mode (default: False)
-  - `max_agent_budget`: Maximum budget per agent run in USD (default: 1.0)
-  - `global_max_budget`: Maximum total budget across all agents in USD (default: 10.0)
-  - `use_google_search`: Automatically add Google search tool if enabled (default: True)
+  - `max_agent_budget`: Maximum budget per agent run in USD (default: 10.0)
+  - `global_max_budget`: Maximum total budget across all agents in USD (default: 200.0)
+  - `use_web_search`: Automatically add web search tool if enabled (default: True)
 - **GEPA Settings**: Modify `DEFAULT_CONFIG.gepa` in `src/kiss/agents/gepa/config.py`:
   - `reflection_model`: Model to use for reflection (default: "gemini-3-flash-preview")
   - `max_generations`: Maximum number of evolutionary generations (default: 10)
@@ -748,10 +788,12 @@ The framework provides embedding generation capabilities through the `get_embedd
 - **Together AI Models**: Full embedding support via Together AI's embeddings API
   - Default model: `togethercomputer/m2-bert-80M-8k-retrieval` (can be customized)
   - Usage: `model.get_embedding(text, embedding_model="togethercomputer/m2-bert-80M-8k-retrieval")`
+- **Gemini Models**: Full embedding support via Google's embedding API
+  - Default model: `text-embedding-004` (can be customized)
+  - Usage: `model.get_embedding(text, embedding_model="text-embedding-004")`
 - **Anthropic Models**: Embeddings not supported (raises `NotImplementedError`)
-- **Gemini Models**: Embeddings not supported (raises `NotImplementedError`)
 
-Embeddings are primarily used by the `SimpleRAG` system for document retrieval. When using `SimpleRAG`, ensure you use an OpenAI or Together AI model that supports embeddings.
+Embeddings are primarily used by the `SimpleRAG` system for document retrieval. When using `SimpleRAG`, ensure you use an OpenAI, Together AI, or Gemini model that supports embeddings.
 
 ## Contributing
 
