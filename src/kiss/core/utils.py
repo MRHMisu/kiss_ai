@@ -12,6 +12,7 @@ from typing import Any, TypeVar, cast
 import yaml
 
 from kiss.core.config import DEFAULT_CONFIG
+from kiss.core.kiss_error import KISSError
 
 T = TypeVar("T")
 
@@ -151,6 +152,71 @@ def finish(
         sort_keys=False,
     )
     return cast(str, result_str)
+
+
+def read_project_file(file_path_relative_to_project_root: str) -> str:
+    """Read a file from the project root.
+
+    Compatible with installations packaged as .whl (zip) or source.
+
+    Args:
+        file_path_relative_to_project_root (str): Path relative to the project root.
+
+    Returns:
+        str: The file's contents.
+    """
+    import importlib.resources
+    import os
+
+    # Try usual filesystem access from root
+    project_root = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..")
+    )
+    abs_path = os.path.join(project_root, file_path_relative_to_project_root)
+    if os.path.isfile(abs_path):
+        return open(abs_path, encoding="utf-8").read()
+
+    rel_parts = file_path_relative_to_project_root.strip("/").split("/")
+    if len(rel_parts) > 1:
+        pkg = ".".join(rel_parts[:-1])
+        file = rel_parts[-1]
+    else:
+        pkg = ""
+        file = file_path_relative_to_project_root
+
+    try:
+        if pkg:
+            return importlib.resources.read_text(pkg, file, encoding="utf-8")
+        else:
+            # If no package, try relative to this module's package
+            return importlib.resources.read_text(__package__, file, encoding="utf-8")
+    except Exception as e:
+        raise KISSError(
+            f"Could not find '{file_path_relative_to_project_root}' "
+            f"as a file or in a package. ({e})"
+        )
+
+
+def read_project_file_from_package(file_name_as_python_package: str) -> str:
+    """Read a file from the project root.
+
+    Args:
+        file_name_as_python_package (str): File name as a Python package.
+
+    Returns:
+        str: The file's contents.
+    """
+    import importlib.resources
+
+    try:
+        return importlib.resources.read_text(
+            __package__, file_name_as_python_package, encoding="utf-8"
+        )
+    except Exception as e:
+        raise KISSError(
+            f"Could not find '{file_name_as_python_package}' "
+            f"as a file or in a package. ({e})"
+        )
 
 def _fetch_page_content(url: str, headers: dict[str, str], max_content_length: int = 10000) -> str:
     """

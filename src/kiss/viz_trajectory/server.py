@@ -84,7 +84,8 @@ def _parse_state_dir_timestamp(state_dir: str) -> datetime:
 def load_trajectories(artifact_dir: Path) -> dict[str, list[dict]]:
     """Load all trajectory files from the artifact directory.
 
-    `KISSAgent._save()` writes YAML files under: <artifact_dir>/<run_subdir>/trajectory_*.yaml
+    `KISSAgent._save()` writes YAML files under:
+        <artifact_dir>/<run_subdir>/trajectories/trajectory_*.yaml
     So we scan subdirectories and group results by that run subdir.
     """
     state_to_trajectories: dict[str, list[dict]] = {}

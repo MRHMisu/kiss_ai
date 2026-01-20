@@ -6,7 +6,6 @@
 """Core KISS agent implementation with native function calling support."""
 
 import json
-import random
 import sys
 import time
 import traceback
@@ -38,9 +37,6 @@ class KISSAgent:
 
     agent_counter: ClassVar[int] = 1
     global_budget_used: ClassVar[float] = 0.0
-    artifact_subdir: ClassVar[str] = (
-        f"{time.strftime('%S_%M_%H_%d_%m_%Y')}_{random.randint(0, 1000000)}"
-    )
 
     def __init__(
         self,
@@ -217,7 +213,7 @@ class KISSAgent:
             )
 
         finally:
-            self._save(DEFAULT_CONFIG.agent.artifact_dir)
+            self._save()
 
     def get_trajectory(self) -> str:
         """Returns the trajectory of the agent in standard JSON format for visualization."""
@@ -370,10 +366,10 @@ class KISSAgent:
             "command": " ".join(sys.argv),
         }
 
-    def _save(self, folder: str) -> None:
+    def _save(self) -> None:
         """Save the agent's state to a file."""
         state = self._build_state_dict()
-        folder_path = Path(folder) / KISSAgent.artifact_subdir
+        folder_path = Path(DEFAULT_CONFIG.agent.artifact_dir) / "trajectories"
         folder_path.mkdir(parents=True, exist_ok=True)
         # Replace characters that could cause path issues (spaces and slashes)
         name_safe = self.name.replace(" ", "_").replace("/", "_")

@@ -6,10 +6,22 @@
 """Configuration Pydantic models for KISS agent settings with CLI support."""
 
 import os
+import random
+import time
 from typing import Any
 
 from pydantic import BaseModel, Field
 
+
+def _generate_artifact_dir() -> str:
+    """Generate a unique artifact subdirectory name based on timestamp and random number."""
+    from pathlib import Path
+    artifact_name = f"{time.strftime('%S_%M_%H_%d_%m_%Y')}_{random.randint(0, 1000000)}"
+    artifact_path = Path("artifact").resolve() / artifact_name
+    artifact_path.mkdir(parents=True, exist_ok=True)
+    return str(artifact_path)
+
+artifact_dir = _generate_artifact_dir()
 
 class APIKeysConfig(BaseModel):
     GEMINI_API_KEY: str = Field(
@@ -41,7 +53,7 @@ class AgentConfig(BaseModel):
     max_steps: int = Field(default=100, description="Maximum iterations in the ReAct loop")
     verbose: bool = Field(default=True, description="Enable verbose output")
     debug: bool = Field(default=False, description="Enable debug mode")
-    artifact_dir: str = Field(default="artifacts", description="Directory to save artifacts")
+    artifact_dir: str = Field(default=artifact_dir, description="Directory to save artifacts")
     max_agent_budget: float = Field(default=10.0, description="Maximum budget for an agent")
     global_max_budget: float = Field(
         default=200.0, description="Maximum budget for the global agent"
